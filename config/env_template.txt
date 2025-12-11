@@ -1,0 +1,32 @@
+# Atria Credentials
+ATRIA_EMAIL=office@thermoslim.co
+ATRIA_PASSWORD=ThermoSlim1!
+
+# AssemblyAI API Key
+ASSEMBLYAI_API_KEY=your_assemblyai_api_key_here
+
+# Anthropic (Claude) API Key
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+
+# Google Sheets Configuration
+GOOGLE_SHEETS_ID=1U3AT_QWiCWAIxelc3ngGP2CiKjn9GPxjgaPczUcE0nM
+GOOGLE_SERVICE_ACCOUNT_FILE=config/google_service_account.json
+
+# Google Drive Configuration
+GOOGLE_DRIVE_FOLDER_ID=1aK5jJORoquHZsU83T-UJne_vqvG2Fy7F
+
+# Make.com Webhook URLs
+MAKE_WEBHOOK_NEW_AD=your_make_webhook_url_for_new_ads
+MAKE_WEBHOOK_ANALYSIS_COMPLETE=your_make_webhook_url_for_analysis
+MAKE_WEBHOOK_SCRIPT_READY=your_make_webhook_url_for_scripts
+
+# Local webhook server (for Make.com to trigger Python)
+WEBHOOK_SERVER_PORT=5000
+WEBHOOK_SECRET_KEY=your_secret_key_here
+
+# Competitors to track
+COMPETITORS=colonbroom.com,skinnyfit.com,sereneherbs.com
+
+# Filtering settings
+MIN_AD_DAYS_ACTIVE=7
+

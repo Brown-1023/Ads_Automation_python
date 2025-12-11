@@ -1,0 +1,31 @@
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Environment variables (secrets)
+.env
+config/.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Logs
+logs/
+*.log
+
+# Data files (large files, generated data)
+data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
