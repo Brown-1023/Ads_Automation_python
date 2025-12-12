@@ -265,18 +265,14 @@ class AtriaScraper:
         """
         ads = []
         domain = competitor['domain']
-        filter_keyword = competitor.get('filter')
         
         try:
             logger.info(f"Filtering for ads active {self.min_days_active}+ days")
             
-            # Build search query: domain + filter keyword (e.g., "sereneherbs.com+GLP1")
-            if filter_keyword:
-                search_query = f"{domain}+{filter_keyword}"
-            else:
-                search_query = domain
+            # Search only by domain (filter_keyword is ignored for now)
+            search_query = domain
             
-            logger.info(f"Searching ads for competitor: {domain} (query: {search_query})")
+            logger.info(f"Searching ads for competitor: {domain}")
             
             # Navigate directly to discovery URL with search parameters
             # This is more reliable than typing in the search box
@@ -552,11 +548,6 @@ class AtriaScraper:
                 try:
                     ad_data = await self._extract_ad_data(card, competitor)
                     if ad_data and ad_data.get('id') not in seen_ids:
-                        # Apply keyword filter if specified
-                        if competitor.get('filter'):
-                            if not await self._matches_filter(ad_data, competitor['filter']):
-                                continue
-                        
                         # Filter by minimum days active
                         days_active = ad_data.get('days_active')
                         if days_active is not None and days_active < self.min_days_active:
