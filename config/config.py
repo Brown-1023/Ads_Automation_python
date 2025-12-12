@@ -89,7 +89,7 @@ COMPETITORS = [
 
 # Filtering settings
 FILTER_CONFIG = {
-    'min_days_active': int(os.getenv('MIN_AD_DAYS_ACTIVE', 7)),
+    'min_days_active': int(os.getenv('MIN_AD_DAYS_ACTIVE', 7)),  # Default to 7 days for proven ads
     'max_days_active': None,  # No upper limit by default
 }
 
@@ -166,6 +166,22 @@ Analyze and provide:
 
 Provide a detailed, actionable analysis.""",
 
+    # Structured analysis for Google Sheets output
+    'structured_analysis': """Analyze this competitor ad transcript and extract the following information.
+Return your response in the EXACT JSON format specified below.
+
+Transcript:
+{transcript}
+
+Return ONLY valid JSON in this exact format (no markdown, no extra text):
+{{
+    "top_hooks": "The strongest opening line(s) from the ad - quote the exact hook text",
+    "top_angles": "List the main sales angles used (e.g., transformation, authority, social proof, urgency)",
+    "pain_points": "List the customer frustrations/problems mentioned in the ad",
+    "emotional_triggers": "List the emotions the ad activates (e.g., fear, hope, curiosity, desire, frustration)",
+    "why_this_works": "2-3 sentence summary of why this ad is effective and what makes it work"
+}}""",
+
     'script_rewrite': """Based on this competitor ad analysis and transcript, create a new, original script for our brand.
 
 ORIGINAL TRANSCRIPT:
@@ -206,5 +222,26 @@ OUTPUT FORMAT:
 ---
 SCRIPT NOTES:
 (Any production notes or suggestions)""",
+
+    # Hook variations generator
+    'hook_variations': """Based on this ad transcript and analysis, generate 3 alternative opening hooks for testing.
+
+ORIGINAL TRANSCRIPT:
+{transcript}
+
+BRAND: {brand_name}
+PRODUCT BENEFITS: {product_benefits}
+
+Generate 3 distinctly different hooks using these techniques:
+1. Question Hook - Start with a provocative question
+2. Story Hook - Start with a relatable personal story/anecdote
+3. Shock/Stat Hook - Start with a surprising fact or statistic
+
+Return ONLY valid JSON in this exact format (no markdown, no extra text):
+{{
+    "hook_1_question": "Your question hook here",
+    "hook_2_story": "Your story hook here", 
+    "hook_3_shock": "Your shock/stat hook here"
+}}""",
 }
 

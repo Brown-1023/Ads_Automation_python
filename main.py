@@ -113,7 +113,7 @@ class CreativeIntelligenceEngine:
     async def analyze_ads(
         self,
         ads: list[dict],
-        analysis_type: str = 'full',
+        analysis_type: str = 'structured',
     ) -> list[dict]:
         """
         Analyze all transcribed ads.
@@ -235,7 +235,7 @@ class CreativeIntelligenceEngine:
             
             # Step 3: Analyze
             logger.info("Step 3: Analyzing ad transcripts...")
-            ads = await self.analyze_ads(ads, analysis_type='full')
+            ads = await self.analyze_ads(ads, analysis_type='structured')
             
             # Step 4: Rewrite scripts
             logger.info("Step 4: Generating new scripts...")
@@ -301,7 +301,7 @@ class CreativeIntelligenceEngine:
     async def run_analyze_only(
         self,
         ads_file: str = None,
-        analysis_type: str = 'full',
+        analysis_type: str = 'structured',
     ) -> list[dict]:
         """Run only the analysis step on existing transcribed ads."""
         if ads_file:
@@ -351,7 +351,7 @@ async def pipeline_handler(**kwargs):
     elif action == 'analyze':
         await engine.run_analyze_only(
             kwargs.get('ads_file'),
-            kwargs.get('analysis_type', 'full'),
+            kwargs.get('analysis_type', 'structured'),
         )
     elif action == 'rewrite':
         await engine.run_rewrite_only(
@@ -399,9 +399,9 @@ def main():
     
     parser.add_argument(
         '--analysis-type',
-        choices=['hooks', 'angles', 'emotional', 'full'],
-        default='full',
-        help='Type of analysis to perform',
+        choices=['hooks', 'angles', 'emotional', 'full', 'structured'],
+        default='structured',
+        help='Type of analysis to perform (structured is best for Google Sheets)',
     )
     
     parser.add_argument(

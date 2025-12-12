@@ -212,6 +212,58 @@ OUTPUT FORMAT:
             }]
         return []
     
+    async def generate_hook_variations(
+        self,
+        transcript: str,
+        brand_name: str = None,
+        product_benefits: str = None,
+    ) -> Optional[dict]:
+        """
+        Generate 3 alternative hook variations for testing.
+        
+        Args:
+            transcript: Original ad transcript
+            brand_name: Brand name for hooks
+            product_benefits: Key product benefits
+            
+        Returns:
+            Dictionary with 3 hook variations or None if failed
+        """
+        brand_name = brand_name or self.default_brand_name
+        product_benefits = product_benefits or self.default_product_benefits
+        
+        prompt = ANALYSIS_PROMPTS['hook_variations'].format(
+            transcript=transcript,
+            brand_name=brand_name,
+            product_benefits=product_benefits,
+        )
+        
+        system = "You are an expert ad copywriter. Generate compelling hooks. Return ONLY valid JSON."
+        
+        response = await self._call_claude_async(prompt, system)
+        
+        if response:
+            try:
+                # Clean up response
+                cleaned = response.strip()
+                if cleaned.startswith('```'):
+                    cleaned = cleaned.split('```')[1]
+                    if cleaned.startswith('json'):
+                        cleaned = cleaned[4:]
+                    cleaned = cleaned.strip()
+                
+                parsed = json.loads(cleaned)
+                return parsed
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse hook variations JSON")
+                return {
+                    'hook_1_question': '',
+                    'hook_2_story': '',
+                    'hook_3_shock': '',
+                    'raw_response': response,
+                }
+        return None
+    
     async def rewrite_ad(
         self,
         ad_data: dict,
@@ -230,7 +282,22 @@ OUTPUT FORMAT:
             Updated ad data with new script or None if failed
         """
         transcript = ad_data.get('transcript')
-        analysis = ad_data.get('analysis', {}).get('full', {}).get('analysis', '')
+        
+        # Try to get analysis - check both full and structured formats
+        analysis = ''
+        if ad_data.get('analysis'):
+            if 'full' in ad_data['analysis']:
+                analysis = ad_data['analysis']['full'].get('analysis', '')
+            elif 'structured' in ad_data['analysis']:
+                # Build analysis from structured data
+                structured = ad_data['analysis']['structured']
+                analysis = f"""
+Top Hooks: {structured.get('top_hooks', '')}
+Top Angles: {structured.get('top_angles', '')}
+Pain Points: {structured.get('pain_points', '')}
+Emotional Triggers: {structured.get('emotional_triggers', '')}
+Why This Works: {structured.get('why_this_works', '')}
+"""
         
         if not transcript:
             logger.warning(f"No transcript for ad {ad_data.get('id')}")
@@ -251,6 +318,27 @@ OUTPUT FORMAT:
         
         if script_data:
             ad_data['rewritten_script'] = script_data
+            
+            # Also add brand_aligned_script field for Google Sheets
+            ad_data['brand_aligned_script'] = script_data.get('script', '')
+            
+            # Generate separate hook variations
+            hook_vars = await self.generate_hook_variations(
+                transcript=transcript,
+                brand_name=brand_name,
+                product_benefits=product_benefits,
+            )
+            
+            if hook_vars:
+                # Format hook variations as a single string for Google Sheets
+                hook_variations_text = f"""1. Question: {hook_vars.get('hook_1_question', '')}
+
+2. Story: {hook_vars.get('hook_2_story', '')}
+
+3. Shock/Stat: {hook_vars.get('hook_3_shock', '')}"""
+                
+                ad_data['hook_variations'] = hook_variations_text
+                script_data['hook_variations_parsed'] = hook_vars
             
             # Save to file
             script_file = PROCESSED_DIR / f"{ad_data.get('id')}_script.json"

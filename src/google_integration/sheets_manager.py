@@ -269,19 +269,47 @@ class GoogleSheetsManager:
             if not worksheet:
                 return False
             
-            # Extract analysis data
-            analysis = ad_data.get('analysis', {})
-            full_analysis = analysis.get('full', {}).get('analysis', '')
+            # First check for structured analysis fields directly on ad_data
+            # (These are added by the structured_analysis method)
+            top_hooks = ad_data.get('top_hooks', '')
+            top_angles = ad_data.get('top_angles', '')
+            pain_points = ad_data.get('pain_points', '')
+            emotional_triggers = ad_data.get('emotional_triggers', '')
+            why_this_works = ad_data.get('why_this_works', '')
             
-            # Parse sections from analysis
-            sections = self._extract_analysis_sections(full_analysis)
+            # If structured fields not present, try to extract from full analysis
+            if not top_hooks:
+                analysis = ad_data.get('analysis', {})
+                
+                # Check for structured analysis
+                if 'structured' in analysis:
+                    structured = analysis['structured']
+                    top_hooks = structured.get('top_hooks', '')
+                    top_angles = structured.get('top_angles', '')
+                    pain_points = structured.get('pain_points', '')
+                    emotional_triggers = structured.get('emotional_triggers', '')
+                    why_this_works = structured.get('why_this_works', '')
+                # Fallback to parsing full analysis
+                elif 'full' in analysis:
+                    full_analysis = analysis['full'].get('analysis', '')
+                    sections = self._extract_analysis_sections(full_analysis)
+                    top_hooks = sections['top_hooks']
+                    top_angles = sections['top_angles']
+                    pain_points = sections['pain_points']
+                    emotional_triggers = sections['emotional_triggers']
+                    why_this_works = sections['why_it_works']
             
-            # Get rewritten script
-            script_data = ad_data.get('rewritten_script', {})
-            brand_script = script_data.get('script', '')[:3000] if script_data else ''
+            # Get rewritten script - check direct field first, then nested
+            brand_script = ad_data.get('brand_aligned_script', '')
+            if not brand_script:
+                script_data = ad_data.get('rewritten_script', {})
+                brand_script = script_data.get('script', '')[:3000] if script_data else ''
             
-            # Get hook variations
-            hook_variations = self._extract_hook_variations(script_data)
+            # Get hook variations - check direct field first
+            hook_variations = ad_data.get('hook_variations', '')
+            if not hook_variations:
+                script_data = ad_data.get('rewritten_script', {})
+                hook_variations = self._extract_hook_variations(script_data) if script_data else ''
             
             # Determine platform
             platform = ad_data.get('platform', 'Unknown')
@@ -300,13 +328,13 @@ class GoogleSheetsManager:
                 ad_data.get('competitor', ''),                                   # Competitor Name
                 platform,                                                        # Platform
                 (ad_data.get('transcript') or '')[:5000],                        # Transcript (Raw)
-                sections['top_hooks'],                                           # Top Hooks
-                sections['top_angles'],                                          # Top Angles Used
-                sections['pain_points'],                                         # Pain Points
-                sections['emotional_triggers'],                                  # Emotional Triggers
-                sections['why_it_works'],                                        # Why This Ad Works
-                brand_script,                                                    # Brand-Aligned Script
-                hook_variations,                                                 # Hook Variations (3 Options)
+                str(top_hooks)[:2000],                                           # Top Hooks
+                str(top_angles)[:2000],                                          # Top Angles Used
+                str(pain_points)[:2000],                                         # Pain Points
+                str(emotional_triggers)[:2000],                                  # Emotional Triggers
+                str(why_this_works)[:2000],                                      # Why This Ad Works
+                brand_script[:5000],                                             # Brand-Aligned Script
+                str(hook_variations)[:3000],                                     # Hook Variations (3 Options)
                 str(ad_data.get('days_active', '')),                            # Days Active
                 ad_data.get('scraped_at', datetime.now().isoformat()),          # Scraped At
                 'Processed',                                                     # Status

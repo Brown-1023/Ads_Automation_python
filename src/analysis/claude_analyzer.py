@@ -174,13 +174,59 @@ Provide comprehensive, actionable analysis that can be used to inform new creati
             }
         return None
     
-    async def analyze_ad(self, ad_data: dict, analysis_type: str = 'full') -> Optional[dict]:
+    async def structured_analysis(self, transcript: str) -> Optional[dict]:
+        """
+        Perform structured analysis that returns parsed JSON for Google Sheets.
+        
+        Args:
+            transcript: The ad transcript text
+            
+        Returns:
+            Dictionary with structured fields or None if failed
+        """
+        prompt = ANALYSIS_PROMPTS['structured_analysis'].format(transcript=transcript)
+        system = """You are an elite ad analyst. Extract insights from ad transcripts.
+Return ONLY valid JSON with no markdown formatting or extra text.
+Be concise but comprehensive in your analysis."""
+        
+        response = await self._call_claude_async(prompt, system)
+        
+        if response:
+            try:
+                # Clean up response - remove any markdown formatting
+                cleaned = response.strip()
+                if cleaned.startswith('```'):
+                    # Remove markdown code blocks
+                    cleaned = cleaned.split('```')[1]
+                    if cleaned.startswith('json'):
+                        cleaned = cleaned[4:]
+                    cleaned = cleaned.strip()
+                
+                # Parse JSON
+                parsed = json.loads(cleaned)
+                parsed['analyzed_at'] = datetime.now().isoformat()
+                return parsed
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse structured analysis JSON: {e}")
+                # Return raw response if JSON parsing fails
+                return {
+                    'top_hooks': response[:500],
+                    'top_angles': '',
+                    'pain_points': '',
+                    'emotional_triggers': '',
+                    'why_this_works': '',
+                    'raw_response': response,
+                    'analyzed_at': datetime.now().isoformat(),
+                }
+        return None
+    
+    async def analyze_ad(self, ad_data: dict, analysis_type: str = 'structured') -> Optional[dict]:
         """
         Analyze an ad from its metadata.
         
         Args:
             ad_data: Ad metadata dictionary with transcript
-            analysis_type: Type of analysis ('hooks', 'angles', 'emotional', 'full')
+            analysis_type: Type of analysis ('hooks', 'angles', 'emotional', 'full', 'structured')
             
         Returns:
             Updated ad data with analysis or None if failed
@@ -198,9 +244,10 @@ Provide comprehensive, actionable analysis that can be used to inform new creati
             'angles': self.analyze_angles,
             'emotional': self.analyze_emotional_triggers,
             'full': self.full_analysis,
+            'structured': self.structured_analysis,
         }
         
-        analyzer_func = analysis_map.get(analysis_type, self.full_analysis)
+        analyzer_func = analysis_map.get(analysis_type, self.structured_analysis)
         analysis_result = await analyzer_func(transcript)
         
         if analysis_result:
@@ -208,6 +255,14 @@ Provide comprehensive, actionable analysis that can be used to inform new creati
             if 'analysis' not in ad_data:
                 ad_data['analysis'] = {}
             ad_data['analysis'][analysis_type] = analysis_result
+            
+            # For structured analysis, also add fields directly to ad_data for easy access
+            if analysis_type == 'structured':
+                ad_data['top_hooks'] = analysis_result.get('top_hooks', '')
+                ad_data['top_angles'] = analysis_result.get('top_angles', '')
+                ad_data['pain_points'] = analysis_result.get('pain_points', '')
+                ad_data['emotional_triggers'] = analysis_result.get('emotional_triggers', '')
+                ad_data['why_this_works'] = analysis_result.get('why_this_works', '')
             
             # Save analysis to file
             analysis_file = ANALYSIS_DIR / f"{ad_data.get('id')}_analysis.json"

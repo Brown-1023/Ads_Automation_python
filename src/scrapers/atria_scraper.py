@@ -58,7 +58,12 @@ class AtriaScraper:
         self.playwright = await async_playwright().start()
         self.browser = await self.playwright.chromium.launch(
             headless=True,
-            args=['--no-sandbox', '--disable-setuid-sandbox']
+            args=[
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',  # Prevents crashes in low memory environments
+                '--disable-gpu',
+            ]
         )
         self.context = await self.browser.new_context(
             viewport={'width': 1920, 'height': 1080},
@@ -70,6 +75,39 @@ class AtriaScraper:
         self.page.on("response", self._handle_response)
         
         logger.info("Browser initialized successfully")
+    
+    async def _reinitialize_browser(self):
+        """Reinitialize browser after a crash."""
+        logger.info("Reinitializing browser after crash...")
+        try:
+            if self.browser:
+                await self.browser.close()
+        except Exception:
+            pass
+        try:
+            if self.playwright:
+                await self.playwright.stop()
+        except Exception:
+            pass
+        
+        # Reinitialize
+        self.playwright = await async_playwright().start()
+        self.browser = await self.playwright.chromium.launch(
+            headless=True,
+            args=[
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+            ]
+        )
+        self.context = await self.browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        )
+        self.page = await self.context.new_page()
+        self.page.on("response", self._handle_response)
+        logger.info("Browser reinitialized successfully")
     
     async def _handle_response(self, response):
         """
@@ -230,6 +268,8 @@ class AtriaScraper:
         filter_keyword = competitor.get('filter')
         
         try:
+            logger.info(f"Filtering for ads active {self.min_days_active}+ days")
+            
             # Build search query: domain + filter keyword (e.g., "sereneherbs.com+GLP1")
             if filter_keyword:
                 search_query = f"{domain}+{filter_keyword}"
@@ -241,19 +281,15 @@ class AtriaScraper:
             # Navigate directly to discovery URL with search parameters
             # This is more reliable than typing in the search box
             # format=video filters for video ads, status=active shows only active ads
+            # Note: Duration filtering is done in code after extracting ads (min_days_active check)
             search_url = f"{self.discovery_url}?format=video&status=active&q={search_query}&searchType=ad_copy&sortBy=most_relevant"
             logger.info(f"Navigating to: {search_url}")
             
             await self.page.goto(search_url, wait_until='domcontentloaded', timeout=120000)
-            await asyncio.sleep(5)  # Wait for page to load
             
-            # Wait for network to settle
-            try:
-                await self.page.wait_for_load_state('networkidle', timeout=30000)
-            except Exception:
-                logger.warning("Network idle timeout, proceeding anyway")
-            
-            await asyncio.sleep(3)  # Additional wait for content to render
+            # Wait for the loading spinner to disappear (Atria shows a spinner while loading)
+            logger.info("Waiting for page content to load...")
+            await self._wait_for_content_load()
             
             # Take screenshot for debugging
             await self.page.screenshot(path=str(RAW_ADS_DIR / f'search_results_{domain}.png'))
@@ -261,20 +297,121 @@ class AtriaScraper:
             # Try to find and apply filters (active for 7+ days)
             await self._apply_duration_filter()
             
-            # Scroll and collect ads
+            # Scroll and collect ads (filtering for min_days_active is done inside)
             ads = await self._collect_ads_from_page(competitor)
             
-            logger.info(f"Found {len(ads)} ads for {domain}")
+            logger.info(f"Found {len(ads)} ads for {domain} (filtered for {self.min_days_active}+ days active)")
             
         except asyncio.TimeoutError:
             logger.error(f"Timeout searching ads for {domain}")
-            await self.page.screenshot(path=str(RAW_ADS_DIR / f'search_error_{domain}.png'))
+            try:
+                await self.page.screenshot(path=str(RAW_ADS_DIR / f'search_error_{domain}.png'), timeout=10000)
+            except Exception:
+                logger.debug("Failed to capture error screenshot")
         except Exception as e:
+            error_msg = str(e).lower()
             logger.error(f"Error searching ads for {domain}: {e}")
-            await self.page.screenshot(path=str(RAW_ADS_DIR / f'search_error_{domain}.png'))
+            
+            # If browser crashed or closed, reinitialize and try to continue
+            if 'crash' in error_msg or 'closed' in error_msg or 'target' in error_msg or 'connection' in error_msg:
+                logger.warning("Browser crashed or closed, reinitializing...")
+                try:
+                    await self._reinitialize_browser()
+                    # Re-login after reinitialize
+                    await self.login()
+                except Exception as reinit_error:
+                    logger.error(f"Failed to reinitialize browser: {reinit_error}")
+            else:
+                try:
+                    await self.page.screenshot(path=str(RAW_ADS_DIR / f'search_error_{domain}.png'), timeout=10000)
+                except Exception:
+                    logger.debug("Failed to capture error screenshot")
             
         return ads
     
+    async def _wait_for_content_load(self, max_wait: int = 60):
+        """
+        Wait for the page content to fully load.
+        Atria uses client-side rendering, so we need to wait for:
+        1. The loading spinner to disappear
+        2. Actual ad content to appear OR "no results" message
+        
+        Args:
+            max_wait: Maximum seconds to wait for content
+        """
+        start_time = asyncio.get_event_loop().time()
+        
+        # First, wait for loading spinner to disappear
+        spinner_selectors = [
+            '[class*="loading"]',
+            '[class*="spinner"]',
+            '[class*="Spinner"]',
+            'svg[class*="animate-spin"]',
+            '[data-loading="true"]',
+        ]
+        
+        for i in range(max_wait // 2):  # Check every 2 seconds
+            spinner_found = False
+            for selector in spinner_selectors:
+                try:
+                    spinner = await self.page.query_selector(selector)
+                    if spinner and await spinner.is_visible():
+                        spinner_found = True
+                        break
+                except Exception:
+                    continue
+            
+            if not spinner_found:
+                logger.info(f"Loading spinner disappeared after {i * 2} seconds")
+                break
+            
+            await asyncio.sleep(2)
+        
+        # Now wait for actual content to appear
+        content_selectors = [
+            # Ad cards or grid items
+            '[class*="grid"] > div',
+            '[class*="Grid"] > div',
+            'div[class*="card"]',
+            'div[class*="Card"]',
+            # Main content area
+            'main div:has(img)',
+            'main div:has(video)',
+            # No results message
+            ':text("No results")',
+            ':text("No ads found")',
+            ':text("0 results")',
+        ]
+        
+        for i in range(max_wait // 2):
+            for selector in content_selectors:
+                try:
+                    elements = await self.page.query_selector_all(selector)
+                    if elements and len(elements) > 0:
+                        # Check if at least one is visible
+                        for elem in elements[:5]:  # Check first 5
+                            try:
+                                if await elem.is_visible():
+                                    elapsed = asyncio.get_event_loop().time() - start_time
+                                    logger.info(f"Content loaded after {elapsed:.1f}s (found {len(elements)} elements with selector: {selector})")
+                                    await asyncio.sleep(2)  # Extra time for rendering
+                                    return
+                            except Exception:
+                                continue
+                except Exception:
+                    continue
+            
+            await asyncio.sleep(2)
+        
+        # If we get here, content didn't load - try a page refresh once
+        elapsed = asyncio.get_event_loop().time() - start_time
+        logger.warning(f"Content didn't load after {elapsed:.1f}s, trying page refresh...")
+        try:
+            await self.page.reload(wait_until='domcontentloaded', timeout=30000)
+            await asyncio.sleep(5)  # Wait after reload
+        except Exception as e:
+            logger.warning(f"Page refresh failed: {e}, continuing anyway...")
+
     async def _apply_duration_filter(self):
         """Apply filter for ads active for minimum days (7+ days)."""
         try:
@@ -329,13 +466,13 @@ class AtriaScraper:
         except Exception as e:
             logger.warning(f"Error applying duration filter: {e}")
     
-    async def _collect_ads_from_page(self, competitor: dict, max_scroll: int = 10) -> list[dict]:
+    async def _collect_ads_from_page(self, competitor: dict, max_scroll: int = 25) -> list[dict]:
         """
         Collect ad data from the current page with scrolling.
         
         Args:
             competitor: Competitor configuration
-            max_scroll: Maximum number of scroll iterations
+            max_scroll: Maximum number of scroll iterations (increased to 25 for 7+ day filtering)
             
         Returns:
             List of ad metadata dictionaries
@@ -420,6 +557,12 @@ class AtriaScraper:
                             if not await self._matches_filter(ad_data, competitor['filter']):
                                 continue
                         
+                        # Filter by minimum days active
+                        days_active = ad_data.get('days_active')
+                        if days_active is not None and days_active < self.min_days_active:
+                            logger.info(f"Filtered out ad {ad_data.get('id')} - only {days_active} days active (min: {self.min_days_active})")
+                            continue
+                        
                         # If it's a video ad, try to get the actual video URL
                         if ad_data.get('video_duration') or ad_data.get('media_type') == 'video':
                             video_url = await self._get_video_url_for_ad(card, ad_data)
@@ -430,10 +573,15 @@ class AtriaScraper:
                         
                         ads.append(ad_data)
                         seen_ids.add(ad_data.get('id'))
-                        logger.debug(f"Found ad: {ad_data.get('id')}")
+                        logger.info(f"Found ad: {ad_data.get('id')} ({days_active} days active)")
                 except Exception as e:
                     logger.warning(f"Error extracting ad data: {e}")
                     continue
+            
+            # Early exit if we have enough qualifying ads (10 per competitor is usually sufficient)
+            if len(ads) >= 10:
+                logger.info(f"Found {len(ads)} qualifying ads, stopping scroll early")
+                break
             
             # Scroll down to load more
             await self.page.evaluate('window.scrollBy(0, window.innerHeight)')
@@ -1143,6 +1291,20 @@ class AtriaScraper:
         
         # Scrape each competitor
         for competitor in COMPETITORS:
+            # Check if browser is still healthy, reinitialize if needed
+            try:
+                await self.page.evaluate('1+1')
+            except Exception as e:
+                logger.warning(f"Browser health check failed: {e}, reinitializing...")
+                try:
+                    await self._reinitialize_browser()
+                    if not await self.login():
+                        logger.error("Failed to re-login after browser reinit")
+                        continue
+                except Exception as reinit_error:
+                    logger.error(f"Failed to reinitialize browser: {reinit_error}")
+                    continue
+            
             logger.info(f"Processing competitor: {competitor['name']}")
             ads = await self.search_competitor_ads(competitor)
             
