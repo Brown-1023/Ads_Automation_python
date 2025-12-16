@@ -462,7 +462,7 @@ class AtriaScraper:
         except Exception as e:
             logger.warning(f"Error applying duration filter: {e}")
     
-    async def _collect_ads_from_page(self, competitor: dict, max_scroll: int = 25) -> list[dict]:
+    async def _collect_ads_from_page(self, competitor: dict, max_scroll: int = 40) -> list[dict]:
         """
         Collect ad data from the current page with scrolling.
         
@@ -548,10 +548,18 @@ class AtriaScraper:
                 try:
                     ad_data = await self._extract_ad_data(card, competitor)
                     if ad_data and ad_data.get('id') not in seen_ids:
-                        # Filter by minimum days active
+                        ad_id = ad_data.get('id')
+                        # Mark as seen FIRST to prevent duplicate processing
+                        seen_ids.add(ad_id)
+                        
+                        # Get extra info for logging
                         days_active = ad_data.get('days_active')
+                        date_range = ad_data.get('date_range', 'Unknown date')
+                        atria_link = ad_data.get('atria_link', '')
+                        
+                        # Filter by minimum days active
                         if days_active is not None and days_active < self.min_days_active:
-                            logger.info(f"Filtered out ad {ad_data.get('id')} - only {days_active} days active (min: {self.min_days_active})")
+                            logger.info(f"Filtered out ad {ad_id} - {days_active} days active (min: {self.min_days_active}) | Date: {date_range} | {atria_link}")
                             continue
                         
                         # If it's a video ad, try to get the actual video URL
@@ -560,11 +568,10 @@ class AtriaScraper:
                             if video_url:
                                 ad_data['media_url'] = video_url
                                 ad_data['media_type'] = 'video'
-                                logger.info(f"Got video URL for ad {ad_data.get('id')}: {video_url[:80]}...")
+                                logger.info(f"Got video URL for ad {ad_id}: {video_url[:80]}...")
                         
                         ads.append(ad_data)
-                        seen_ids.add(ad_data.get('id'))
-                        logger.info(f"Found ad: {ad_data.get('id')} ({days_active} days active)")
+                        logger.info(f"✅ Found ad: {ad_id} ({days_active} days active) | Date: {date_range} | {atria_link}")
                 except Exception as e:
                     logger.warning(f"Error extracting ad data: {e}")
                     continue
@@ -825,10 +832,12 @@ class AtriaScraper:
             
             # Get date/duration info (Atria shows "Nov 26, 2025 - Present")
             days_active = None
+            date_range_str = None
             date_match = re.search(r'(\w+\s+\d+,?\s+\d{4})\s*[-–]\s*(Present|\w+\s+\d+,?\s+\d{4})', card_text)
             if date_match:
                 start_date_str = date_match.group(1)
                 end_date_str = date_match.group(2)
+                date_range_str = f"{start_date_str} - {end_date_str}"
                 try:
                     from dateutil import parser
                     start_date = parser.parse(start_date_str)
@@ -837,8 +846,12 @@ class AtriaScraper:
                     else:
                         end_date = parser.parse(end_date_str)
                     days_active = (end_date - start_date).days
-                except Exception:
-                    pass
+                    logger.debug(f"Date extracted: '{start_date_str}' -> {days_active} days active")
+                except Exception as e:
+                    logger.debug(f"Date parse error: {e}")
+            else:
+                # Log when no date match is found
+                logger.debug(f"No date match in card text: {card_text[:100]}...")
             
             # Get video duration (shown as "00:29" etc)
             video_duration = None
@@ -880,6 +893,9 @@ class AtriaScraper:
             if video_duration and media_type != 'video':
                 media_type = 'video'  # Has duration, so it's a video
             
+            # Construct Atria overview link
+            atria_link = f"https://app.tryatria.com/workspace/brand/m{ad_id}/overview" if ad_id else None
+            
             return {
                 'id': ad_id,
                 'competitor': competitor['name'],
@@ -889,9 +905,11 @@ class AtriaScraper:
                 'media_type': media_type,
                 'ad_text': card_text[:500] if card_text else None,
                 'days_active': days_active,
+                'date_range': date_range_str,
                 'video_duration': video_duration,
                 'platform': platform,
                 'ad_link': ad_link,
+                'atria_link': atria_link,
                 'scraped_at': datetime.now().isoformat(),
                 'filter_keyword': competitor.get('filter'),
             }
